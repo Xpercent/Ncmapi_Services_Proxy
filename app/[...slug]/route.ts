@@ -1,8 +1,8 @@
 import { NextRequest } from 'next/server';
-import { transformPlaylistCombined, transformAlbum } from '@/lib/transformers';
+import { transformPlaylistOnly, transformAlbum } from '@/lib/transformers';
 
 const ALLOWED_PATHS = [
-    'playlist', // 修改后的新接口
+    'playlist',
     'search',
     'album'
 ];
@@ -32,28 +32,36 @@ export async function GET(
     };
 
     try {
-        // --- 特殊处理：playlist 聚合接口 ---
+        // --- 1. 处理 /playlist 路径 ---
         if (fullPath === 'playlist') {
-            if (!id) return new Response('Missing id', { status: 400 });
+            if (!id) return new Response(JSON.stringify({ error: 'Missing id' }), { status: 400 });
 
-            // 并行发起两个请求
+            // 仅请求 detail 接口
+            const response = await fetch(`${baseUrl}/playlist/detail?id=${id}`, fetchOptions);
+            let data = await response.json();
+            
+            // 转换数据
+            data = transformPlaylistOnly(data);
+
+            return new Response(JSON.stringify(data, null, 2), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' },
+            });
+
+            /* 
+            // 备用：同时请求两个接口的聚合逻辑
             const [detailRes, tracksRes] = await Promise.all([
                 fetch(`${baseUrl}/playlist/detail?id=${id}`, fetchOptions),
                 fetch(`${baseUrl}/playlist/track/all?id=${id}`, fetchOptions)
             ]);
-
             const detailData = await detailRes.json();
             const tracksData = await tracksRes.json();
-
             const combinedData = transformPlaylistCombined(detailData, tracksData);
-
-            return new Response(JSON.stringify(combinedData, null, 2), {
-                status: 200,
-                headers: { 'Content-Type': 'application/json' },
-            });
+            return new Response(JSON.stringify(combinedData, null, 2), { ... });
+            */
         }
 
-        // --- 普通处理：其他接口 ---
+        // --- 2. 处理其他路径 ---
         const finalUrl = `${baseUrl}/${fullPath}?${searchParams.toString()}`;
         const response = await fetch(finalUrl, fetchOptions);
         let data = await response.json();
