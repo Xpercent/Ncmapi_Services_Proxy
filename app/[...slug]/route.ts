@@ -1,68 +1,76 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { transformPlaylistTracks } from '@/lib/transformers';
+import { NextRequest } from 'next/server';
+import { transformPlaylistCombined, transformAlbum } from '@/lib/transformers';
 
 const ALLOWED_PATHS = [
-    'playlist/track/all',
+    'playlist', // 修改后的新接口
     'search',
     'album'
 ];
 
-// 注意：context 的类型现在要求 params 是一个 Promise
 export async function GET(
     request: NextRequest,
     context: { params: Promise<{ slug: string[] }> }
 ) {
-    // 1. 必须使用 await 获取 params
     const { slug } = await context.params;
     const fullPath = slug.join('/');
 
-    // 2. 白名单精确校验
     if (!ALLOWED_PATHS.includes(fullPath)) {
-        return NextResponse.json({ error: 'Access Denied: 路径未授权' }, { status: 403 });
+        return new Response(JSON.stringify({ error: 'Access Denied' }, null, 2), {
+            status: 403,
+            headers: { 'Content-Type': 'application/json' },
+        });
     }
 
-    // 3. 构建目标 URL
     const { searchParams } = new URL(request.url);
+    const id = searchParams.get('id');
     const baseUrl = process.env.TARGET_API_URL;
-    const finalUrl = `${baseUrl}/${fullPath}${searchParams.toString() ? '?' + searchParams.toString() : ''}`;
+    const fetchOptions = {
+        headers: {
+            'key': process.env.INTERNAL_KEY || '',
+            'Content-Type': 'application/json',
+        }
+    };
 
     try {
-        const response = await fetch(finalUrl, {
-            method: 'GET',
-            headers: {
-                'key': process.env.INTERNAL_KEY || '',
-                'Content-Type': 'application/json',
-            },
-        });
+        // --- 特殊处理：playlist 聚合接口 ---
+        if (fullPath === 'playlist') {
+            if (!id) return new Response('Missing id', { status: 400 });
 
+            // 并行发起两个请求
+            const [detailRes, tracksRes] = await Promise.all([
+                fetch(`${baseUrl}/playlist/detail?id=${id}`, fetchOptions),
+                fetch(`${baseUrl}/playlist/track/all?id=${id}`, fetchOptions)
+            ]);
+
+            const detailData = await detailRes.json();
+            const tracksData = await tracksRes.json();
+
+            const combinedData = transformPlaylistCombined(detailData, tracksData);
+
+            return new Response(JSON.stringify(combinedData, null, 2), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' },
+            });
+        }
+
+        // --- 普通处理：其他接口 ---
+        const finalUrl = `${baseUrl}/${fullPath}?${searchParams.toString()}`;
+        const response = await fetch(finalUrl, fetchOptions);
         let data = await response.json();
 
-        // 4. 数据处理
-        if (fullPath === 'playlist/track/all') {
-            data = transformPlaylistTracks(data);
+        if (fullPath === 'album') {
+            data = transformAlbum(data);
         }
+
         return new Response(JSON.stringify(data, null, 2), {
             status: 200,
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: { 'Content-Type': 'application/json' },
         });
+
     } catch (error: any) {
-        return NextResponse.json({ error: 'Proxy Error: ' + error.message }, { status: 500 });
+        return new Response(JSON.stringify({ error: 'Proxy Error', message: error.message }, null, 2), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+        });
     }
-}
-
-// 如果你有 POST，也要改
-export async function POST(
-    request: NextRequest,
-    context: { params: Promise<{ slug: string[] }> }
-) {
-    const { slug } = await context.params;
-    const fullPath = slug.join('/');
-
-    if (!ALLOWED_PATHS.includes(fullPath)) {
-        return NextResponse.json({ error: 'Access Denied' }, { status: 403 });
-    }
-
-    // ... 其余 POST 逻辑相同，记得使用 await context.params
 }
