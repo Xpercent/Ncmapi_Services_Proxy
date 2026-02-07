@@ -47,18 +47,6 @@ export async function GET(
                 status: 200,
                 headers: { 'Content-Type': 'application/json' },
             });
-
-            /* 
-            // 备用：同时请求两个接口的聚合逻辑
-            const [detailRes, tracksRes] = await Promise.all([
-                fetch(`${baseUrl}/playlist/detail?id=${id}`, fetchOptions),
-                fetch(`${baseUrl}/playlist/track/all?id=${id}`, fetchOptions)
-            ]);
-            const detailData = await detailRes.json();
-            const tracksData = await tracksRes.json();
-            const combinedData = transformPlaylistCombined(detailData, tracksData);
-            return new Response(JSON.stringify(combinedData, null, 2), { ... });
-            */
         }
 
         // --- 2. 处理其他路径 ---
